@@ -1,0 +1,11 @@
+pipelines:
+  - key: daily_revenue
+    airflow_dag_id: daily_revenue_dag
+    owner: analytics
+    criticality: critical
+    inputs:
+      - dataset: public.purchases
+        columns: [purchased_at, amount]
+    outputs:
+      - dataset: mart.daily_revenue
+        columns: [date, revenue]

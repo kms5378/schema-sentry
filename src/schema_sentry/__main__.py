@@ -1,0 +1,4 @@
+from schema_sentry.cli import app
+
+if __name__ == "__main__":
+    app()
