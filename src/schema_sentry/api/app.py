@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from schema_sentry.api.routers import changes, health, pipelines, scans
+from schema_sentry.api.routers import alerts, changes, health, pipelines, scans
 
 
 def create_app() -> FastAPI:
@@ -9,4 +9,5 @@ def create_app() -> FastAPI:
     app.include_router(scans.router)
     app.include_router(changes.router)
     app.include_router(pipelines.router)
+    app.include_router(alerts.router)
     return app

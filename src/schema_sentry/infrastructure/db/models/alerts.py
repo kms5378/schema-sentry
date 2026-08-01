@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from schema_sentry.domain.enums import AlertChannel, AlertStatus
@@ -11,6 +11,9 @@ from schema_sentry.infrastructure.db.models.scans import ScanRunModel
 
 class AlertDeliveryModel(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "alert_deliveries"
+    __table_args__ = (
+        UniqueConstraint("scan_id", "channel", name="alert_delivery_identity"),
+    )
 
     scan_id: Mapped[UUID] = mapped_column(ForeignKey("scan_runs.id", ondelete="CASCADE"))
     channel: Mapped[AlertChannel] = mapped_column(

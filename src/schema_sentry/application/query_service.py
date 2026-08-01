@@ -4,6 +4,8 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from schema_sentry.domain.enums import (
+    AlertChannel,
+    AlertStatus,
     ChangeState,
     ChangeType,
     ScanStatus,
@@ -26,6 +28,18 @@ class PersistedChange:
 
 
 @dataclass(frozen=True, slots=True)
+class PersistedDelivery:
+    id: UUID
+    channel: AlertChannel
+    status: AlertStatus
+    attempt_count: int
+    provider_message_id: str | None
+    last_error: str | None
+    next_retry_at: datetime | None
+    sent_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
 class PersistedScan:
     id: UUID
     source_key: str
@@ -37,6 +51,7 @@ class PersistedScan:
     error_code: str | None
     error_message: str | None
     changes: tuple[PersistedChange, ...]
+    deliveries: tuple[PersistedDelivery, ...] = ()
 
 
 class ScanQueryPersistence(Protocol):

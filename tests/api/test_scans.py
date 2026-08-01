@@ -48,6 +48,7 @@ def test_source_failure_is_sanitized(
 
     assert response.status_code == 503
     assert response.json() == {"detail": "source database unavailable"}
+    assert api_fakes.dispatcher.failed_sources == ["game"]
 
 
 def test_scan_request_validation_returns_422(

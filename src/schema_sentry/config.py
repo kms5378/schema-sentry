@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal, Self
 
-from pydantic import SecretStr, model_validator
+from pydantic import AnyHttpUrl, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     auth_disabled: bool = False
     trust_proxy_auth: bool = False
     log_level: str = "INFO"
+    slack_webhook_url: SecretStr | None = None
+    smtp_host: str = "mailpit"
+    smtp_port: int = 1025
+    email_from: str = "schema-sentry@localhost"
+    email_to: tuple[str, ...] = ()
+    dashboard_base_url: AnyHttpUrl = AnyHttpUrl("http://localhost:8000/")
 
     @model_validator(mode="after")
     def protect_production_authentication(self) -> Self:

@@ -36,6 +36,17 @@ services:
       timeout: 3s
       retries: 15
 
+  mailpit:
+    image: axllent/mailpit:v1.30.6
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8025/readyz"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
   api:
     build:
       context: .
@@ -45,12 +56,19 @@ services:
       SCHEMA_SENTRY_SOURCE_DATABASE_URL: postgresql+psycopg://schema_sentry_reader:${SOURCE_DB_READER_PASSWORD:-source_reader_dev}@source-db:5432/game_source
       SCHEMA_SENTRY_API_KEY: ${SCHEMA_SENTRY_API_KEY:-local-development-key}
       SCHEMA_SENTRY_AUTH_DISABLED: "true"
+      SCHEMA_SENTRY_SMTP_HOST: mailpit
+      SCHEMA_SENTRY_SMTP_PORT: "1025"
+      SCHEMA_SENTRY_EMAIL_FROM: schema-sentry@localhost
+      SCHEMA_SENTRY_EMAIL_TO: '${SCHEMA_SENTRY_EMAIL_TO:-["owner@example.com"]}'
+      SCHEMA_SENTRY_DASHBOARD_BASE_URL: ${SCHEMA_SENTRY_DASHBOARD_BASE_URL:-http://localhost:8000/}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
       source-db:
         condition: service_healthy
       metadata-db:
+        condition: service_healthy
+      mailpit:
         condition: service_healthy
     healthcheck:
       test:

@@ -6,8 +6,12 @@ from uuid import UUID
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from schema_sentry.application.query_service import PersistedChange, PersistedScan
-from schema_sentry.domain.enums import ChangeState, ScanStatus, ScanTrigger
+from schema_sentry.application.query_service import (
+    PersistedChange,
+    PersistedDelivery,
+    PersistedScan,
+)
+from schema_sentry.domain.enums import AlertChannel, ChangeState, ScanStatus, ScanTrigger, Severity
 from schema_sentry.domain.fingerprint import change_fingerprint
 from schema_sentry.domain.models import (
     CanonicalType,
@@ -17,6 +21,7 @@ from schema_sentry.domain.models import (
     SchemaChange,
 )
 from schema_sentry.infrastructure.db.models import (
+    AlertDeliveryModel,
     DatasetModel,
     DataSourceModel,
     ExpectedColumnModel,
@@ -63,9 +68,7 @@ class ScanQueryRepository:
         scan = self.session.get(ScanRunModel, scan_id)
         return self._to_persisted(scan, current_open_changes=False) if scan else None
 
-    def _to_persisted(
-        self, scan: ScanRunModel, *, current_open_changes: bool
-    ) -> PersistedScan:
+    def _to_persisted(self, scan: ScanRunModel, *, current_open_changes: bool) -> PersistedScan:
         source = self.session.get(DataSourceModel, scan.source_id)
         if source is None:
             raise LookupError(f"scan source not found: {scan.source_id}")
@@ -101,6 +104,23 @@ class ScanQueryRepository:
             )
             for change, dataset in change_rows
         )
+        deliveries = tuple(
+            PersistedDelivery(
+                id=delivery.id,
+                channel=delivery.channel,
+                status=delivery.status,
+                attempt_count=delivery.attempt_count,
+                provider_message_id=delivery.provider_message_id,
+                last_error=delivery.last_error,
+                next_retry_at=delivery.next_retry_at,
+                sent_at=delivery.sent_at,
+            )
+            for delivery in self.session.scalars(
+                select(AlertDeliveryModel)
+                .where(AlertDeliveryModel.scan_id == scan.id)
+                .order_by(AlertDeliveryModel.channel)
+            )
+        )
         return PersistedScan(
             id=scan.id,
             source_key=source.key,
@@ -112,6 +132,7 @@ class ScanQueryRepository:
             error_code=scan.error_code,
             error_message=scan.error_message,
             changes=changes,
+            deliveries=deliveries,
         )
 
 
@@ -121,8 +142,13 @@ class SourceNotFound(LookupError):
 
 
 class SqlAlchemyScanRepository:
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        alert_channels: tuple[AlertChannel, ...] = (),
+    ) -> None:
         self.session = session
+        self.alert_channels = alert_channels
 
     @contextmanager
     def try_source_lock(self, source_key: str) -> Iterator[bool]:
@@ -244,11 +270,14 @@ class SqlAlchemyScanRepository:
             )
         }
         active_fingerprints: set[str] = set()
+        has_new_alertable_change = False
         for change in changes:
             fingerprint = change_fingerprint(source_key, change)
             active_fingerprints.add(fingerprint)
             if fingerprint in open_changes:
                 continue
+            if change.severity in {Severity.WARNING, Severity.BREAKING}:
+                has_new_alertable_change = True
             dataset = datasets.get(change.dataset)
             if dataset is None:
                 raise LookupError(f"baseline dataset not found: {change.dataset.qualified_name}")
@@ -270,6 +299,8 @@ class SqlAlchemyScanRepository:
             if fingerprint not in active_fingerprints:
                 persisted.state = ChangeState.RESOLVED
                 persisted.resolved_at = finished_at
+        if has_new_alertable_change:
+            self._create_pending_deliveries(scan)
         self._complete_scan(scan, finished_at)
         self.session.flush()
 
@@ -286,6 +317,7 @@ class SqlAlchemyScanRepository:
         scan.duration_ms = self._duration_ms(scan.started_at, finished_at)
         scan.error_code = error_code
         scan.error_message = error_message
+        self._create_pending_deliveries(scan)
         self.session.flush()
 
     def expected_column_count(self, source_key: str) -> int:
@@ -336,6 +368,11 @@ class SqlAlchemyScanRepository:
         scan.status = ScanStatus.COMPLETED
         scan.finished_at = finished_at
         scan.duration_ms = self._duration_ms(scan.started_at, finished_at)
+
+    def _create_pending_deliveries(self, scan: ScanRunModel) -> None:
+        self.session.add_all(
+            [AlertDeliveryModel(scan=scan, channel=channel) for channel in self.alert_channels]
+        )
 
     @staticmethod
     def _duration_ms(started_at: datetime, finished_at: datetime) -> int:

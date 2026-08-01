@@ -4,9 +4,21 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from schema_sentry.application.query_service import PersistedChange, PersistedScan
+from schema_sentry.application.query_service import (
+    PersistedChange,
+    PersistedDelivery,
+    PersistedScan,
+)
 from schema_sentry.application.scan_service import ScanReport
-from schema_sentry.domain.enums import ChangeState, ChangeType, ScanStatus, ScanTrigger, Severity
+from schema_sentry.domain.enums import (
+    AlertChannel,
+    AlertStatus,
+    ChangeState,
+    ChangeType,
+    ScanStatus,
+    ScanTrigger,
+    Severity,
+)
 
 
 class ManualScanRequest(BaseModel):
@@ -67,6 +79,30 @@ class ScanResponse(BaseModel):
         )
 
 
+class ScanDeliveryResponse(BaseModel):
+    id: UUID
+    channel: AlertChannel
+    status: AlertStatus
+    attempt_count: int
+    provider_message_id: str | None
+    last_error: str | None
+    next_retry_at: datetime | None
+    sent_at: datetime | None
+
+    @classmethod
+    def from_persisted(cls, delivery: PersistedDelivery) -> "ScanDeliveryResponse":
+        return cls(
+            id=delivery.id,
+            channel=delivery.channel,
+            status=delivery.status,
+            attempt_count=delivery.attempt_count,
+            provider_message_id=delivery.provider_message_id,
+            last_error=delivery.last_error,
+            next_retry_at=delivery.next_retry_at,
+            sent_at=delivery.sent_at,
+        )
+
+
 class ScanDetailResponse(BaseModel):
     scan_id: UUID
     source_key: str
@@ -78,6 +114,7 @@ class ScanDetailResponse(BaseModel):
     error_code: str | None
     error_message: str | None
     changes: list[ScanChangeResponse]
+    deliveries: list[ScanDeliveryResponse]
 
     @classmethod
     def from_persisted(cls, scan: PersistedScan) -> "ScanDetailResponse":
@@ -92,4 +129,7 @@ class ScanDetailResponse(BaseModel):
             error_code=scan.error_code,
             error_message=scan.error_message,
             changes=[ScanChangeResponse.from_persisted(change) for change in scan.changes],
+            deliveries=[
+                ScanDeliveryResponse.from_persisted(delivery) for delivery in scan.deliveries
+            ],
         )

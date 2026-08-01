@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import httpx
 import psycopg
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
@@ -8,8 +9,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from schema_sentry.api.app import create_app
 from schema_sentry.config import Settings, get_settings
-from schema_sentry.domain.enums import ScanStatus
-from schema_sentry.infrastructure.db.models import DataSourceModel, ScanRunModel
+from schema_sentry.domain.enums import AlertStatus, ScanStatus
+from schema_sentry.infrastructure.db.models import (
+    AlertDeliveryModel,
+    DataSourceModel,
+    ScanRunModel,
+)
 
 
 def test_manual_scan_api_commits_result_and_reports_readiness(
@@ -135,3 +140,52 @@ def test_latest_scan_keeps_open_drift_visible_after_deduplicated_rescan(
     assert len(repeated.json()["changes"]) == 1
     assert len(latest.json()["changes"]) == 1
     assert latest.json()["changes"][0]["column_name"] == "amount"
+
+
+def test_api_dispatches_email_only_after_outbox_commit(
+    migrated_engine: Engine,
+    source_database_url: str,
+    game_source_schema: None,
+) -> None:
+    httpx.delete("http://localhost:8025/api/v1/messages")
+    factory = sessionmaker(bind=migrated_engine, expire_on_commit=False)
+    with factory.begin() as session:
+        session.add(
+            DataSourceModel(
+                key="game",
+                display_name="Game database",
+                connection_ref="SCHEMA_SENTRY_SOURCE_DATABASE_URL",
+            )
+        )
+    settings = Settings(
+        environment="test",
+        metadata_database_url=migrated_engine.url.render_as_string(hide_password=False),
+        source_database_url=source_database_url,
+        api_key=SecretStr("integration-api-key"),
+        smtp_host="localhost",
+        email_to=("owner@example.com",),
+    )
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: settings
+    headers = {"X-API-Key": "integration-api-key"}
+
+    with TestClient(app) as client:
+        client.post("/api/v1/scans", json={"source_key": "game"}, headers=headers)
+        with psycopg.connect(
+            "postgresql://game_admin:game_admin_dev@localhost:55432/game_source",
+            autocommit=True,
+        ) as connection:
+            connection.execute(Path("demo/sql/010_breaking_change.sql").read_text())
+        response = client.post("/api/v1/scans", json={"source_key": "game"}, headers=headers)
+        latest = client.get("/api/v1/scans/latest")
+
+    with Session(migrated_engine) as verification_session:
+        delivery = verification_session.scalar(select(AlertDeliveryModel))
+    mailpit = httpx.get("http://localhost:8025/api/v1/messages").json()
+
+    assert response.status_code == 201
+    assert delivery is not None
+    assert delivery.status is AlertStatus.SENT
+    assert mailpit["total"] == 1
+    assert latest.json()["deliveries"][0]["channel"] == "EMAIL"
+    assert latest.json()["deliveries"][0]["status"] == "SENT"

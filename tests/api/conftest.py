@@ -9,17 +9,20 @@ from pydantic import SecretStr
 from schema_sentry.api.app import create_app
 from schema_sentry.api.dependencies import (
     get_change_service,
+    get_notification_dispatcher,
+    get_notification_service,
     get_readiness_checker,
     get_scan_query_service,
     get_scan_service,
     get_validation_service,
 )
 from schema_sentry.application.change_service import AcceptanceResult
+from schema_sentry.application.notification_service import DeliveryResult
 from schema_sentry.application.query_service import PersistedScan
 from schema_sentry.application.scan_service import ScanReport
 from schema_sentry.application.validation_service import PipelineValidation
 from schema_sentry.config import Settings, get_settings
-from schema_sentry.domain.enums import ScanStatus, ScanTrigger
+from schema_sentry.domain.enums import AlertChannel, ScanStatus, ScanTrigger
 
 API_KEY = "contract-test-api-key"
 SCAN_ID = uuid4()
@@ -90,6 +93,34 @@ class FakeReadinessChecker:
         return self.ready
 
 
+class FakeNotificationService:
+    def __init__(self) -> None:
+        self.error: Exception | None = None
+
+    def retry(self, delivery_id: UUID) -> DeliveryResult:
+        if self.error:
+            raise self.error
+        return DeliveryResult(
+            delivery_id=delivery_id,
+            channel=AlertChannel.SLACK,
+            success=True,
+            attempt_count=2,
+            next_retry_at=None,
+        )
+
+
+class FakeNotificationDispatcher:
+    def __init__(self) -> None:
+        self.scan_ids: list[UUID] = []
+        self.failed_sources: list[str] = []
+
+    def dispatch_scan(self, scan_id: UUID) -> None:
+        self.scan_ids.append(scan_id)
+
+    def dispatch_system_error(self, source_key: str) -> None:
+        self.failed_sources.append(source_key)
+
+
 @dataclass
 class ApiFakes:
     scan: FakeScanService
@@ -97,6 +128,8 @@ class ApiFakes:
     validation: FakeValidationService
     query: FakeScanQueryService
     readiness: FakeReadinessChecker
+    notification: FakeNotificationService
+    dispatcher: FakeNotificationDispatcher
 
 
 @pytest.fixture
@@ -107,6 +140,8 @@ def api_fakes() -> ApiFakes:
         validation=FakeValidationService(),
         query=FakeScanQueryService(),
         readiness=FakeReadinessChecker(),
+        notification=FakeNotificationService(),
+        dispatcher=FakeNotificationDispatcher(),
     )
 
 
@@ -129,6 +164,8 @@ def client(api_fakes: ApiFakes, settings: Settings) -> TestClient:
     app.dependency_overrides[get_validation_service] = lambda: api_fakes.validation
     app.dependency_overrides[get_scan_query_service] = lambda: api_fakes.query
     app.dependency_overrides[get_readiness_checker] = lambda: api_fakes.readiness
+    app.dependency_overrides[get_notification_service] = lambda: api_fakes.notification
+    app.dependency_overrides[get_notification_dispatcher] = lambda: api_fakes.dispatcher
     return TestClient(app)
 
 
