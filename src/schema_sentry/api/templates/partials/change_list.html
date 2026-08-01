@@ -1,0 +1,86 @@
+<section id="changes-panel" class="changes-panel" aria-live="polite" aria-labelledby="schema-changes">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Drift review</p>
+      <h2 id="schema-changes">Schema changes</h2>
+    </div>
+    {% if scan %}
+      <span class="count-badge">{{ scan.changes|length }} open</span>
+    {% endif %}
+  </div>
+
+  {% if message %}
+    <div class="notice notice-{{ message_kind }}" role="status">{{ message }}</div>
+  {% endif %}
+
+  {% if scan and scan.changes %}
+    <div class="change-stack">
+      {% for change in scan.changes %}
+        <article class="change-card severity-{{ change.severity.value|lower }}">
+          <header class="change-header">
+            <div>
+              <p class="change-type">{{ change.change_type.value|replace('_', ' ')|title }}</p>
+              <h3>{{ change.dataset.qualified_name }}.<strong>{{ change.column_name }}</strong></h3>
+            </div>
+            <span class="severity-label">{{ change.severity.value }}</span>
+          </header>
+
+          <div class="type-transition" aria-label="Column type transition">
+            <div><span>Before</span><code>{{ change.before|column_type }}</code></div>
+            <span class="arrow" aria-hidden="true">→</span>
+            <div><span>After</span><code>{{ change.after|column_type }}</code></div>
+          </div>
+
+          <div class="impact-row">
+            <div>
+              <span class="field-label">Pipeline impact</span>
+              {% if change.affected_dags %}
+                <div class="tag-list">
+                  {% for dag in change.affected_dags %}<span class="dag-tag">{{ dag }}</span>{% endfor %}
+                </div>
+              {% else %}
+                <p>No registered DAG is affected.</p>
+              {% endif %}
+            </div>
+            {% if change.state.value == 'OPEN' %}
+              <form
+                hx-post="/actions/changes/{{ change.id }}/accept"
+                hx-target="#changes-panel"
+                hx-swap="outerHTML"
+                hx-disabled-elt="button"
+              >
+                <input type="hidden" name="baseline_version" value="{{ scan.current_baseline_version }}">
+                <button class="secondary-button" type="submit" aria-label="Accept {{ change.dataset.qualified_name }}.{{ change.column_name }} as baseline">
+                  Accept as baseline
+                </button>
+              </form>
+            {% endif %}
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="clear-state">
+      <span aria-hidden="true">✓</span>
+      <div><h3>Metadata is consistent</h3><p>No open schema drift requires review.</p></div>
+    </div>
+  {% endif %}
+
+  {% if scan %}
+    <section class="delivery-strip" aria-labelledby="delivery-summary">
+      <div>
+        <p class="field-label">Notification delivery</p>
+        <h3 id="delivery-summary">Alert status</h3>
+      </div>
+      {% if scan.deliveries %}
+        <ul>
+          {% for delivery in scan.deliveries %}
+            <li>{{ delivery.channel.value|title }}: {{ delivery.status.value }}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="empty-copy">No alerts were required for this scan.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+</section>

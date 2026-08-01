@@ -8,13 +8,20 @@ from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from schema_sentry.api.app import create_app
+from schema_sentry.application.catalog_service import CatalogService
+from schema_sentry.application.query_service import ScanQueryService
 from schema_sentry.config import Settings, get_settings
-from schema_sentry.domain.enums import AlertStatus, ScanStatus
+from schema_sentry.domain.enums import AlertStatus, PipelineCriticality, ScanStatus
 from schema_sentry.infrastructure.db.models import (
     AlertDeliveryModel,
+    DatasetModel,
     DataSourceModel,
+    LineageEdgeModel,
+    PipelineModel,
     ScanRunModel,
 )
+from schema_sentry.infrastructure.db.repositories.catalog import CatalogRepository
+from schema_sentry.infrastructure.db.repositories.scans import ScanQueryRepository
 
 
 def test_manual_scan_api_commits_result_and_reports_readiness(
@@ -127,6 +134,41 @@ def test_latest_scan_keeps_open_drift_visible_after_deduplicated_rescan(
             client.post("/api/v1/scans", json={"source_key": "game"}, headers=headers).status_code
             == 201
         )
+        with factory.begin() as catalog_session:
+            CatalogService(CatalogRepository(catalog_session)).sync(Path("catalog.yaml"))
+            source = catalog_session.scalar(
+                select(DataSourceModel).where(DataSourceModel.key == "game")
+            )
+            daily_revenue = catalog_session.scalar(
+                select(DatasetModel).where(
+                    DatasetModel.schema_name == "mart",
+                    DatasetModel.table_name == "daily_revenue",
+                )
+            )
+            assert source is not None
+            assert daily_revenue is not None
+            executive_kpi = DatasetModel(
+                source=source,
+                schema_name="mart",
+                table_name="executive_kpi",
+            )
+            executive_pipeline = PipelineModel(
+                key="executive_kpi",
+                airflow_dag_id="executive_kpi_dag",
+                owner="analytics",
+                criticality=PipelineCriticality.HIGH,
+            )
+            catalog_session.add_all((executive_kpi, executive_pipeline))
+            catalog_session.flush()
+            catalog_session.add(
+                LineageEdgeModel(
+                    pipeline=executive_pipeline,
+                    upstream_dataset=daily_revenue,
+                    upstream_column="revenue",
+                    downstream_dataset=executive_kpi,
+                    downstream_column="total_revenue",
+                )
+            )
         with psycopg.connect(
             "postgresql://game_admin:game_admin_dev@localhost:55432/game_source",
             autocommit=True,
@@ -136,10 +178,22 @@ def test_latest_scan_keeps_open_drift_visible_after_deduplicated_rescan(
         repeated = client.post("/api/v1/scans", json={"source_key": "game"}, headers=headers)
         latest = client.get("/api/v1/scans/latest")
 
+    with Session(migrated_engine) as query_session:
+        recent = ScanQueryService(ScanQueryRepository(query_session)).recent(5)
+
     assert len(first_drift.json()["changes"]) == 1
     assert len(repeated.json()["changes"]) == 1
     assert len(latest.json()["changes"]) == 1
     assert latest.json()["changes"][0]["column_name"] == "amount"
+    assert latest.json()["current_baseline_version"] == 1
+    assert latest.json()["changes"][0]["affected_dags"] == [
+        "daily_revenue",
+        "executive_kpi_dag",
+    ]
+    assert [scan.id for scan in recent] == [
+        scan.id for scan in sorted(recent, key=lambda scan: scan.started_at, reverse=True)
+    ]
+    assert len(recent) == 3
 
 
 def test_api_dispatches_email_only_after_outbox_commit(

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from schema_sentry.application.catalog_service import CatalogService
 from schema_sentry.application.change_service import BaselineVersionConflict, ChangeService
+from schema_sentry.application.query_service import ScanQueryService
 from schema_sentry.application.scan_service import ScanService
 from schema_sentry.application.validation_service import ValidationService
 from schema_sentry.domain.enums import ChangeState, ScanTrigger
@@ -18,7 +19,10 @@ from schema_sentry.infrastructure.db.models import (
 from schema_sentry.infrastructure.db.postgres_collector import PostgresSchemaCollector
 from schema_sentry.infrastructure.db.repositories.catalog import CatalogRepository
 from schema_sentry.infrastructure.db.repositories.changes import ChangeRepository
-from schema_sentry.infrastructure.db.repositories.scans import SqlAlchemyScanRepository
+from schema_sentry.infrastructure.db.repositories.scans import (
+    ScanQueryRepository,
+    SqlAlchemyScanRepository,
+)
 
 
 def prepare_services(
@@ -97,3 +101,38 @@ def test_acceptance_uses_optimistic_baseline_version(
     assert change.state is ChangeState.ACCEPTED
     assert expected is not None
     assert expected.data_type_json["name"] == "character varying"
+
+
+def test_each_open_change_uses_refreshed_current_baseline_version(
+    session: Session,
+    source_database_url: str,
+    game_source_schema: None,
+) -> None:
+    scan_service, change_service, _ = prepare_services(session, source_database_url)
+    apply_ddl("demo/sql/010_breaking_change.sql")
+    with psycopg.connect(
+        "postgresql://game_admin:game_admin_dev@localhost:55432/game_source",
+        autocommit=True,
+    ) as connection:
+        connection.execute(
+            "ALTER TABLE public.purchases ALTER COLUMN purchased_at DROP NOT NULL"
+        )
+    scan_service.run_scan("game", ScanTrigger.MANUAL)
+    changes = tuple(
+        session.scalars(select(SchemaChangeModel).order_by(SchemaChangeModel.column_name))
+    )
+    query_service = ScanQueryService(ScanQueryRepository(session))
+
+    first_projection = query_service.latest()
+    assert first_projection is not None
+    assert len(changes) == 2
+    assert first_projection.current_baseline_version == 1
+
+    first = change_service.accept(changes[0].id, expected_baseline_version=1)
+    refreshed_projection = query_service.latest()
+    assert refreshed_projection is not None
+    assert first.baseline_version == 2
+    assert refreshed_projection.current_baseline_version == 2
+
+    second = change_service.accept(changes[1].id, expected_baseline_version=2)
+    assert second.baseline_version == 3

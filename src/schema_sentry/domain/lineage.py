@@ -57,8 +57,13 @@ class LineageGraph:
         }
 
     def impacts(self, changes: Sequence[SchemaChange]) -> tuple[PipelineImpact, ...]:
+        return self.impacts_for_columns(
+            tuple(change.ref for change in changes if change.severity is Severity.BREAKING)
+        )
+
+    def impacts_for_columns(self, columns: Sequence[ColumnRef]) -> tuple[PipelineImpact, ...]:
         queue: deque[tuple[ColumnRef, tuple[LineageEdge, ...]]] = deque(
-            (change.ref, ()) for change in changes if change.severity is Severity.BREAKING
+            (column, ()) for column in columns
         )
         visited: set[tuple[str, ColumnRef]] = set()
         found: dict[tuple[str, ColumnRef], PipelineImpact] = {}

@@ -31,8 +31,10 @@ SCAN_ID = uuid4()
 class FakeScanService:
     def __init__(self) -> None:
         self.error: Exception | None = None
+        self.source_keys: list[str] = []
 
     def run_scan(self, source_key: str, trigger: ScanTrigger) -> ScanReport:
+        self.source_keys.append(source_key)
         if self.error:
             raise self.error
         return ScanReport(
@@ -48,8 +50,10 @@ class FakeScanService:
 class FakeChangeService:
     def __init__(self) -> None:
         self.error: Exception | None = None
+        self.accepted: list[tuple[UUID, int]] = []
 
     def accept(self, change_id: UUID, expected_baseline_version: int) -> AcceptanceResult:
+        self.accepted.append((change_id, expected_baseline_version))
         if self.error:
             raise self.error
         return AcceptanceResult(change_id, expected_baseline_version + 1)
@@ -68,6 +72,7 @@ class FakeScanQueryService:
         self.result: PersistedScan | None = PersistedScan(
             id=SCAN_ID,
             source_key="game",
+            current_baseline_version=1,
             trigger=ScanTrigger.MANUAL,
             status=ScanStatus.COMPLETED,
             started_at=datetime(2026, 8, 1, tzinfo=UTC),
@@ -83,6 +88,9 @@ class FakeScanQueryService:
 
     def get(self, scan_id: UUID) -> PersistedScan | None:
         return self.result if self.result and scan_id == self.result.id else None
+
+    def recent(self, limit: int = 5) -> tuple[PersistedScan, ...]:
+        return (self.result,) if self.result else ()
 
 
 class FakeReadinessChecker:
@@ -152,6 +160,7 @@ def settings() -> Settings:
         metadata_database_url="postgresql+psycopg://unused",
         source_database_url="postgresql+psycopg://unused",
         api_key=SecretStr(API_KEY),
+        dashboard_base_url="http://testserver/",
     )
 
 

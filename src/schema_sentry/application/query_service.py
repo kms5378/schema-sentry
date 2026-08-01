@@ -25,6 +25,7 @@ class PersistedChange:
     state: ChangeState
     before: dict[str, Any] | None
     after: dict[str, Any] | None
+    affected_dags: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +44,7 @@ class PersistedDelivery:
 class PersistedScan:
     id: UUID
     source_key: str
+    current_baseline_version: int
     trigger: ScanTrigger
     status: ScanStatus
     started_at: datetime
@@ -59,6 +61,8 @@ class ScanQueryPersistence(Protocol):
 
     def get(self, scan_id: UUID) -> PersistedScan | None: ...
 
+    def recent(self, limit: int) -> tuple[PersistedScan, ...]: ...
+
 
 class ScanQueryService:
     def __init__(self, repository: ScanQueryPersistence) -> None:
@@ -69,3 +73,8 @@ class ScanQueryService:
 
     def get(self, scan_id: UUID) -> PersistedScan | None:
         return self.repository.get(scan_id)
+
+    def recent(self, limit: int = 5) -> tuple[PersistedScan, ...]:
+        if not 1 <= limit <= 50:
+            raise ValueError("recent scan limit must be between 1 and 50")
+        return self.repository.recent(limit)

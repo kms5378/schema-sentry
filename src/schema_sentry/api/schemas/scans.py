@@ -34,6 +34,7 @@ class ScanChangeResponse(BaseModel):
     state: ChangeState | None = None
     before: dict[str, Any] | None
     after: dict[str, Any] | None
+    affected_dags: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_persisted(cls, change: PersistedChange) -> "ScanChangeResponse":
@@ -46,6 +47,7 @@ class ScanChangeResponse(BaseModel):
             state=change.state,
             before=change.before,
             after=change.after,
+            affected_dags=list(change.affected_dags),
         )
 
 
@@ -106,6 +108,7 @@ class ScanDeliveryResponse(BaseModel):
 class ScanDetailResponse(BaseModel):
     scan_id: UUID
     source_key: str
+    current_baseline_version: int
     trigger: ScanTrigger
     status: ScanStatus
     started_at: datetime
@@ -121,6 +124,7 @@ class ScanDetailResponse(BaseModel):
         return cls(
             scan_id=scan.id,
             source_key=scan.source_key,
+            current_baseline_version=scan.current_baseline_version,
             trigger=scan.trigger,
             status=scan.status,
             started_at=scan.started_at,

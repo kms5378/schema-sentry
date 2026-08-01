@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from schema_sentry.application.query_service import (
     PersistedChange,
@@ -13,6 +13,7 @@ from schema_sentry.application.query_service import (
 )
 from schema_sentry.domain.enums import AlertChannel, ChangeState, ScanStatus, ScanTrigger, Severity
 from schema_sentry.domain.fingerprint import change_fingerprint
+from schema_sentry.domain.lineage import LineageEdge, LineageGraph, PipelineDefinition
 from schema_sentry.domain.models import (
     CanonicalType,
     ColumnDefinition,
@@ -27,6 +28,7 @@ from schema_sentry.infrastructure.db.models import (
     ExpectedColumnModel,
     LineageEdgeModel,
     ObservedColumnModel,
+    PipelineModel,
     ScanRunModel,
     SchemaChangeModel,
 )
@@ -68,6 +70,14 @@ class ScanQueryRepository:
         scan = self.session.get(ScanRunModel, scan_id)
         return self._to_persisted(scan, current_open_changes=False) if scan else None
 
+    def recent(self, limit: int) -> tuple[PersistedScan, ...]:
+        scans = tuple(
+            self.session.scalars(
+                select(ScanRunModel).order_by(ScanRunModel.started_at.desc()).limit(limit)
+            )
+        )
+        return tuple(self._to_persisted(scan, current_open_changes=False) for scan in scans)
+
     def _to_persisted(self, scan: ScanRunModel, *, current_open_changes: bool) -> PersistedScan:
         source = self.session.get(DataSourceModel, scan.source_id)
         if source is None:
@@ -80,17 +90,21 @@ class ScanQueryRepository:
             if current_open_changes
             else (SchemaChangeModel.scan_id == scan.id,)
         )
-        change_rows = self.session.execute(
-            select(SchemaChangeModel, DatasetModel)
-            .join(DatasetModel, SchemaChangeModel.dataset_id == DatasetModel.id)
-            .where(*change_filter)
-            .order_by(
-                DatasetModel.schema_name,
-                DatasetModel.table_name,
-                SchemaChangeModel.column_name,
-                SchemaChangeModel.change_type,
+        change_rows = tuple(
+            self.session.execute(
+                select(SchemaChangeModel, DatasetModel)
+                .join(DatasetModel, SchemaChangeModel.dataset_id == DatasetModel.id)
+                .where(*change_filter)
+                .order_by(
+                    DatasetModel.schema_name,
+                    DatasetModel.table_name,
+                    SchemaChangeModel.column_name,
+                    SchemaChangeModel.change_type,
+                )
             )
-        ).tuples()
+            .tuples()
+        )
+        graph = self._lineage_graph()
         changes = tuple(
             PersistedChange(
                 id=change.id,
@@ -101,6 +115,21 @@ class ScanQueryRepository:
                 state=change.state,
                 before=change.before_json,
                 after=change.after_json,
+                affected_dags=tuple(
+                    sorted(
+                        {
+                            impact.pipeline.airflow_dag_id
+                            for impact in graph.impacts_for_columns(
+                                (
+                                    ColumnRef(
+                                        DatasetRef(dataset.schema_name, dataset.table_name),
+                                        change.column_name,
+                                    ),
+                                )
+                            )
+                        }
+                    )
+                ),
             )
             for change, dataset in change_rows
         )
@@ -124,6 +153,7 @@ class ScanQueryRepository:
         return PersistedScan(
             id=scan.id,
             source_key=source.key,
+            current_baseline_version=source.baseline_version,
             trigger=scan.trigger,
             status=scan.status,
             started_at=scan.started_at,
@@ -133,6 +163,42 @@ class ScanQueryRepository:
             error_message=scan.error_message,
             changes=changes,
             deliveries=deliveries,
+        )
+
+    def _lineage_graph(self) -> LineageGraph:
+        upstream_dataset = aliased(DatasetModel)
+        downstream_dataset = aliased(DatasetModel)
+        statement = (
+            select(LineageEdgeModel, PipelineModel, upstream_dataset, downstream_dataset)
+            .join(PipelineModel, LineageEdgeModel.pipeline_id == PipelineModel.id)
+            .join(upstream_dataset, LineageEdgeModel.upstream_dataset_id == upstream_dataset.id)
+            .join(
+                downstream_dataset,
+                LineageEdgeModel.downstream_dataset_id == downstream_dataset.id,
+            )
+        )
+        return LineageGraph(
+            tuple(
+                LineageEdge(
+                    pipeline=PipelineDefinition(
+                        key=pipeline.key,
+                        airflow_dag_id=pipeline.airflow_dag_id,
+                        owner=pipeline.owner,
+                        criticality=pipeline.criticality,
+                    ),
+                    upstream=ColumnRef(
+                        DatasetRef(upstream.schema_name, upstream.table_name),
+                        edge.upstream_column,
+                    ),
+                    downstream=ColumnRef(
+                        DatasetRef(downstream.schema_name, downstream.table_name),
+                        edge.downstream_column,
+                    ),
+                )
+                for edge, pipeline, upstream, downstream in self.session.execute(
+                    statement
+                ).tuples()
+            )
         )
 
 
