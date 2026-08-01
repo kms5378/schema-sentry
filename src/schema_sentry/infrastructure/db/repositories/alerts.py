@@ -137,7 +137,7 @@ class AlertRepository:
         self,
         delivery_id: UUID,
         error: str,
-        next_retry_at: datetime,
+        next_retry_at: datetime | None,
     ) -> None:
         delivery = self._delivery(delivery_id)
         delivery.status = AlertStatus.FAILED

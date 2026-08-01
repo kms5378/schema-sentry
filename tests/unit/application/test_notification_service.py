@@ -171,6 +171,22 @@ def test_retry_before_due_time_is_rejected(alert_context: ScanAlertContext) -> N
         service.retry(delivery.id, now=NOW)
 
 
+def test_third_failure_is_final_without_retry_time(alert_context: ScanAlertContext) -> None:
+    repository = FakeAlertRepository(make_delivery(alert_context, attempts=2), alert_context)
+    service = NotificationService(
+        repository,
+        (FakeNotifier(AlertChannel.SLACK, fail=True),),
+        dashboard_base_url="http://localhost/",
+    )
+
+    result = service.retry(repository.delivery.id, now=NOW)
+
+    assert result.success is False
+    assert result.attempt_count == 3
+    assert result.next_retry_at is None
+    assert repository.delivery.next_retry_at is None
+
+
 def test_fourth_attempt_is_rejected(alert_context: ScanAlertContext) -> None:
     delivery = make_delivery(alert_context, attempts=3)
     service = NotificationService(

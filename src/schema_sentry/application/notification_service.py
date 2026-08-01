@@ -97,7 +97,9 @@ class AlertPersistence(Protocol):
         self, delivery_id: UUID, provider_message_id: str | None, sent_at: datetime
     ) -> None: ...
 
-    def mark_failed(self, delivery_id: UUID, error: str, next_retry_at: datetime) -> None: ...
+    def mark_failed(
+        self, delivery_id: UUID, error: str, next_retry_at: datetime | None
+    ) -> None: ...
 
 
 def build_alert_message(context: ScanAlertContext, dashboard_base_url: str) -> AlertMessage:
@@ -127,7 +129,8 @@ def build_alert_message(context: ScanAlertContext, dashboard_base_url: str) -> A
 
 
 class NotificationService:
-    RETRY_DELAYS = (60, 300, 900)
+    MAX_ATTEMPTS = 3
+    RETRY_DELAYS = (60, 300)
 
     def __init__(
         self,
@@ -161,7 +164,7 @@ class NotificationService:
         delivery = self.repository.lock_delivery(delivery_id)
         if delivery is None:
             raise DeliveryNotFound(delivery_id)
-        if delivery.attempt_count >= len(self.RETRY_DELAYS):
+        if delivery.attempt_count >= self.MAX_ATTEMPTS:
             raise MaxAttemptsExceeded(delivery_id)
         if delivery.next_retry_at and now < delivery.next_retry_at:
             raise RetryNotDue(delivery.next_retry_at)
@@ -177,7 +180,11 @@ class NotificationService:
         try:
             receipt = notifier.send(message)
         except DeliveryFailure as exc:
-            next_retry_at = now + timedelta(seconds=self.RETRY_DELAYS[attempted.attempt_count - 1])
+            next_retry_at = (
+                now + timedelta(seconds=self.RETRY_DELAYS[attempted.attempt_count - 1])
+                if attempted.attempt_count < self.MAX_ATTEMPTS
+                else None
+            )
             self.repository.mark_failed(delivery_id, str(exc), next_retry_at)
             return DeliveryResult(
                 delivery_id=delivery_id,
