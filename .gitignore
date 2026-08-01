@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+.superpowers/
+.DS_Store
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+dist/
+build/
