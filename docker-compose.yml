@@ -1,0 +1,68 @@
+name: schema-sentry
+
+services:
+  source-db:
+    image: postgres:17.10-bookworm
+    environment:
+      POSTGRES_DB: game_source
+      POSTGRES_USER: game_admin
+      POSTGRES_PASSWORD: ${SOURCE_DB_ADMIN_PASSWORD:-game_admin_dev}
+      SCHEMA_SENTRY_SOURCE_READER_PASSWORD: ${SOURCE_DB_READER_PASSWORD:-source_reader_dev}
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - source-data:/var/lib/postgresql/data
+      - ./deploy/postgres/source/001-create-reader.sh:/docker-entrypoint-initdb.d/001-create-reader.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U game_admin -d game_source"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  metadata-db:
+    image: postgres:17.10-bookworm
+    environment:
+      POSTGRES_DB: schema_sentry
+      POSTGRES_USER: schema_sentry
+      POSTGRES_PASSWORD: ${METADATA_DB_PASSWORD:-schema_sentry_dev}
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - metadata-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U schema_sentry -d schema_sentry"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  api:
+    build:
+      context: .
+    environment:
+      SCHEMA_SENTRY_ENVIRONMENT: development
+      SCHEMA_SENTRY_METADATA_DATABASE_URL: postgresql+psycopg://schema_sentry:${METADATA_DB_PASSWORD:-schema_sentry_dev}@metadata-db:5432/schema_sentry
+      SCHEMA_SENTRY_SOURCE_DATABASE_URL: postgresql+psycopg://schema_sentry_reader:${SOURCE_DB_READER_PASSWORD:-source_reader_dev}@source-db:5432/game_source
+      SCHEMA_SENTRY_API_KEY: ${SCHEMA_SENTRY_API_KEY:-local-development-key}
+      SCHEMA_SENTRY_AUTH_DISABLED: "true"
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      source-db:
+        condition: service_healthy
+      metadata-db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  source-data:
+  metadata-data:

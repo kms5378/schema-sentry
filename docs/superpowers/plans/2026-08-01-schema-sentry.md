@@ -180,9 +180,6 @@ dev = [
   "pytest-asyncio==1.4.0", "respx==0.23.1", "ruff==0.16.1"
 ]
 
-[project.scripts]
-schema-sentry = "schema_sentry.cli:app"
-
 [build-system]
 requires = ["hatchling==1.31.0"]
 build-backend = "hatchling.build"
@@ -626,6 +623,7 @@ git push origin main
 - Create: `src/schema_sentry/domain/lineage.py`
 - Create: `src/schema_sentry/cli.py`
 - Create: `src/schema_sentry/__main__.py`
+- Modify: `pyproject.toml`
 - Create: `tests/unit/domain/test_lineage.py`
 - Create: `tests/unit/application/test_catalog_service.py`
 - Create: `tests/integration/test_catalog_sync.py`
@@ -710,6 +708,13 @@ app.add_typer(catalog_app, name="catalog")
 def sync_catalog(path: Path) -> None:
     result = build_catalog_service().sync(path)
     typer.echo(f"synced pipelines={result.pipeline_count} edges={result.edge_count}")
+```
+
+Register the executable in `pyproject.toml`:
+
+```toml
+[project.scripts]
+schema-sentry = "schema_sentry.cli:app"
 ```
 
 Run: `uv run schema-sentry catalog sync catalog.yaml`

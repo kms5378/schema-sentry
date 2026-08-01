@@ -13,5 +13,6 @@ __pycache__/
 .coverage
 htmlcov/
 .venv/
+.python-version.local
 dist/
 build/

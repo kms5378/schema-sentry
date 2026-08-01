@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: docker compose up -d source-db metadata-db
+      - name: Lint
+        run: uv run ruff check .
+      - name: Type check
+        run: uv run mypy src
+      - name: Test
+        env:
+          SCHEMA_SENTRY_SOURCE_DATABASE_URL: postgresql+psycopg://schema_sentry_reader:source_reader_dev@localhost:55432/game_source
+        run: uv run pytest --cov=src/schema_sentry --cov-report=term-missing --cov-fail-under=85

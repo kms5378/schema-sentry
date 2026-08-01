@@ -1,0 +1,53 @@
+[project]
+name = "schema-sentry"
+version = "0.1.0"
+description = "Detect PostgreSQL schema drift before it breaks data pipelines."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "alembic==1.18.5",
+  "fastapi==0.141.1",
+  "httpx==0.28.1",
+  "jinja2==3.1.6",
+  "psycopg[binary]==3.3.4",
+  "pydantic==2.13.4",
+  "pydantic-settings==2.14.2",
+  "pyyaml==6.0.3",
+  "sqlalchemy==2.0.51",
+  "structlog==26.1.0",
+  "typer==0.27.0",
+  "uvicorn[standard]==0.52.0",
+]
+
+[dependency-groups]
+dev = [
+  "mypy==2.3.0",
+  "pytest==9.1.1",
+  "pytest-asyncio==1.4.0",
+  "pytest-cov==7.1.0",
+  "respx==0.23.1",
+  "ruff==0.16.1",
+]
+
+[build-system]
+requires = ["hatchling==1.31.0"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["schema_sentry"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+branch = true
+source = ["schema_sentry"]
