@@ -69,6 +69,7 @@ class ColumnDefinition:
             "data_type": self.data_type.to_canonical_dict(),
             "nullable": self.nullable,
             "default": self.default,
+            "ordinal": self.ordinal,
         }
 
 

@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from schema_sentry.domain.enums import ScanStatus, ScanTrigger
+from schema_sentry.domain.enums import ChangeState, ScanStatus, ScanTrigger
 from schema_sentry.domain.fingerprint import change_fingerprint
 from schema_sentry.domain.models import (
     CanonicalType,
@@ -167,7 +167,21 @@ class SqlAlchemyScanRepository:
         scan = self._scan(scan_id)
         datasets = self._datasets_by_ref(source.id)
         self._persist_observations(scan, observed)
+        open_changes = {
+            change.fingerprint: change
+            for change in self.session.scalars(
+                select(SchemaChangeModel).where(
+                    SchemaChangeModel.source_id == source.id,
+                    SchemaChangeModel.state == ChangeState.OPEN,
+                )
+            )
+        }
+        active_fingerprints: set[str] = set()
         for change in changes:
+            fingerprint = change_fingerprint(source_key, change)
+            active_fingerprints.add(fingerprint)
+            if fingerprint in open_changes:
+                continue
             dataset = datasets.get(change.dataset)
             if dataset is None:
                 raise LookupError(f"baseline dataset not found: {change.dataset.qualified_name}")
@@ -179,12 +193,16 @@ class SqlAlchemyScanRepository:
                     column_name=change.column_name,
                     change_type=change.change_type,
                     severity=change.severity,
-                    fingerprint=change_fingerprint(source_key, change),
+                    fingerprint=fingerprint,
                     before_json=change.before.to_canonical_dict() if change.before else None,
                     after_json=change.after.to_canonical_dict() if change.after else None,
                     baseline_version=source.baseline_version,
                 )
             )
+        for fingerprint, persisted in open_changes.items():
+            if fingerprint not in active_fingerprints:
+                persisted.state = ChangeState.RESOLVED
+                persisted.resolved_at = finished_at
         self._complete_scan(scan, finished_at)
         self.session.flush()
 
