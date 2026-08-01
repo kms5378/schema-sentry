@@ -1,0 +1,34 @@
+name: schema-sentry-demo
+
+services:
+  source-db:
+    environment:
+      POSTGRES_DB: game_source_demo
+    ports: !override
+      - "127.0.0.1:56432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U game_admin -d game_source_demo"]
+
+  metadata-db:
+    environment:
+      POSTGRES_DB: schema_sentry_demo
+    ports: !override
+      - "127.0.0.1:56433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U schema_sentry -d schema_sentry_demo"]
+
+  mailpit:
+    ports: !override
+      - "127.0.0.1:1125:1025"
+      - "127.0.0.1:8125:8025"
+
+  api:
+    environment:
+      SCHEMA_SENTRY_ENVIRONMENT: development
+      SCHEMA_SENTRY_METADATA_DATABASE_URL: postgresql+psycopg://schema_sentry:${METADATA_DB_PASSWORD:-schema_sentry_dev}@metadata-db:5432/schema_sentry_demo
+      SCHEMA_SENTRY_ALEMBIC_DATABASE_URL: postgresql+psycopg://schema_sentry:${METADATA_DB_PASSWORD:-schema_sentry_dev}@metadata-db:5432/schema_sentry_demo
+      SCHEMA_SENTRY_SOURCE_DATABASE_URL: postgresql+psycopg://schema_sentry_reader:${SOURCE_DB_READER_PASSWORD:-source_reader_dev}@source-db:5432/game_source_demo
+      SCHEMA_SENTRY_AUTH_DISABLED: "true"
+      SCHEMA_SENTRY_DASHBOARD_BASE_URL: http://localhost:8100/
+    ports: !override
+      - "127.0.0.1:8100:8000"

@@ -15,6 +15,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY src ./src
+COPY catalog.yaml ./catalog.yaml
 COPY alembic.ini ./alembic.ini
 COPY alembic ./alembic
 RUN uv sync --frozen --no-dev
