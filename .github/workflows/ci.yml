@@ -22,6 +22,15 @@ jobs:
         run: uv run ruff check .
       - name: Type check
         run: uv run mypy src
+      - name: Verify portfolio documentation
+        run: |
+          rg -q 'docker compose up' README.md
+          rg -q 'make demo' README.md
+          rg -q 'Metadata Repository 정합성 검증' README.md
+          rg -q 'pipeline.*validate' README.md
+          test -f docs/architecture.md
+          test -f docs/operations.md
+          test -f docs/portfolio-mapping.md
       - name: Test
         env:
           SCHEMA_SENTRY_SOURCE_DATABASE_URL: postgresql+psycopg://schema_sentry_reader:source_reader_dev@localhost:55432/game_source

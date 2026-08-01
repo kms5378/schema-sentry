@@ -83,7 +83,51 @@ make prod-up
 make prod-smoke
 ```
 
-Back up the named `metadata-data`, `source-data`, `airflow-data`, and `caddy-data` volumes before host upgrades. Test restoration on a separate machine. Do not expose database ports to the LAN.
+Back up the Metadata Repository before upgrades. Prefer a logical backup because it is portable across hosts and can be restored into a fresh PostgreSQL volume:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml \
+  exec -T metadata-db pg_dump -U schema_sentry -d schema_sentry --format=custom \
+  > schema-sentry-metadata-$(date +%Y%m%d-%H%M%S).dump
+```
+
+Store the dump encrypted and off the mini PC. Verify it is non-empty and test restoration into a separate Compose project; never test by overwriting production. One safe rehearsal is:
+
+```bash
+docker compose -p schema-sentry-restore -f docker-compose.yml up -d --wait metadata-db
+docker compose -p schema-sentry-restore -f docker-compose.yml exec -T metadata-db \
+  pg_restore --clean --if-exists --no-owner -U schema_sentry -d schema_sentry \
+  < schema-sentry-metadata-YYYYMMDD-HHMMSS.dump
+docker compose -p schema-sentry-restore -f docker-compose.yml down --volumes
+```
+
+The production volume is project-prefixed; confirm its exact name with `docker volume ls` before any host-level snapshot. Also back up source, Airflow and Caddy state according to their recovery requirements. Do not expose database ports to the LAN.
+
+## Secret rotation
+
+1. Create a fresh backup and verify the current stack is healthy.
+2. Generate a new application API key or Airflow JWT secret with `openssl rand -hex 32`; generate a Caddy bcrypt hash interactively.
+3. Update only `.env.production`, keep mode `600`, and run `make prod-config`.
+4. For the API key, update `SCHEMA_SENTRY_API_KEY` once; both API and Airflow consume the same new value when `make prod-up` recreates them.
+5. For database passwords, change the PostgreSQL role password inside the private network first, then update `.env.production` and recreate dependents. Do one database at a time.
+6. Run `make prod-smoke`, then revoke/delete the old credential from the password manager.
+
+Rotation causes a short single-node restart. Do not print secret values or place them in command arguments, issue descriptions, screenshots, or Git.
+
+## Upgrade procedure
+
+```bash
+git fetch origin
+git log --oneline HEAD..origin/main
+# Review release changes and take a verified metadata backup.
+git pull --ff-only origin main
+make prod-config
+docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml pull
+make prod-up
+make prod-smoke
+```
+
+`metadata-migrate` applies Alembic migrations before API startup. If it fails, keep the API stopped, inspect the bounded migration logs, restore the code/database pair from the verified backup if necessary, and never use `alembic stamp` to hide a mismatch.
 
 ## Failure triage
 
@@ -92,3 +136,32 @@ Back up the named `metadata-data`, `source-data`, `airflow-data`, and `caddy-dat
 3. If `metadata-migrate` failed, fix the database or migration error before restarting API; never stamp a revision without verifying the schema.
 4. If Caddy is unhealthy, validate DNS, ports 80/443, the bcrypt hash, and `deploy/Caddyfile`.
 5. If a scan failed, use its `scan_id` and `source_key` JSON fields. Credentials are redacted by the application logger.
+
+### Source connection or snapshot failure
+
+- Confirm `source-db` health and network reachability from `api`.
+- Verify the configured connection reference resolves to the read-only account, not an admin credential.
+- Check `scan_id`, `source_key`, `error_code` and `status` in structured logs. Error text is sanitized.
+- Fix connectivity or grants, then run a new scan. Never accept or create a baseline from a partial snapshot.
+
+### Migration mismatch
+
+- `GET /health/ready` must agree with the repository Alembic head.
+- Inspect `metadata-migrate` logs and compare the database revision with `alembic heads` from the same application image.
+- Do not start API/Airflow around a failed migration. Repair or restore the database, rerun migration, then smoke-test.
+
+### Failed Slack or email delivery
+
+- Confirm the scan itself is `COMPLETED`; provider failure is intentionally isolated from scan persistence.
+- Check the delivery channel, attempt count, sanitized `last_error` and `next_retry_at` on the dashboard/API.
+- Verify SMTP reachability or the Slack webhook secret without logging it.
+- Retry only after `next_retry_at`. The first and second failures wait 60 and 300 seconds; a third failure is final, stores no next retry time, and no fourth attempt is allowed.
+
+## Known operating limits
+
+- PostgreSQL source only.
+- Ten-minute polling, not real-time CDC.
+- Version-controlled YAML lineage, not SQL parsing.
+- One trusted operator; no in-app RBAC.
+- Single mini PC; backups are required because there is no multi-node failover.
+- Read-only MCP tools are not included in this project scope.
