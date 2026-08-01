@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session, aliased
 
+from schema_sentry.application.change_service import LockedAcceptance as LockedAcceptancePort
 from schema_sentry.application.validation_service import BlockingChange
 from schema_sentry.domain.enums import ChangeState, ChangeType, Severity
 from schema_sentry.domain.lineage import LineageEdge, LineageGraph, PipelineDefinition
@@ -21,7 +22,7 @@ from schema_sentry.infrastructure.db.models import (
 )
 
 
-class LockedAcceptance:
+class SqlAlchemyLockedAcceptance:
     def __init__(
         self,
         session: Session,
@@ -116,7 +117,9 @@ class ChangeRepository:
         return tuple(self.session.scalars(statement))
 
     @contextmanager
-    def acceptance_transaction(self, change_id: UUID) -> Iterator[LockedAcceptance | None]:
+    def acceptance_transaction(
+        self, change_id: UUID
+    ) -> Iterator[LockedAcceptancePort | None]:
         change = self.session.scalar(
             select(SchemaChangeModel).where(
                 SchemaChangeModel.id == change_id,
@@ -132,7 +135,7 @@ class ChangeRepository:
         if source is None:
             yield None
             return
-        yield LockedAcceptance(self.session, source, change)
+        yield SqlAlchemyLockedAcceptance(self.session, source, change)
 
     def list_open_breaking_changes_for_pipeline(
         self, pipeline_key: str

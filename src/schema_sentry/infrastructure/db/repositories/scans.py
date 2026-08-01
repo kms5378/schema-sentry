@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from schema_sentry.application.query_service import PersistedChange, PersistedScan
 from schema_sentry.domain.enums import ChangeState, ScanStatus, ScanTrigger
 from schema_sentry.domain.fingerprint import change_fingerprint
 from schema_sentry.domain.models import (
@@ -46,6 +47,72 @@ class ScanRepository:
             .limit(1)
         )
         return self.session.scalar(statement)
+
+
+class ScanQueryRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def latest(self) -> PersistedScan | None:
+        scan = self.session.scalar(
+            select(ScanRunModel).order_by(ScanRunModel.started_at.desc()).limit(1)
+        )
+        return self._to_persisted(scan, current_open_changes=True) if scan else None
+
+    def get(self, scan_id: UUID) -> PersistedScan | None:
+        scan = self.session.get(ScanRunModel, scan_id)
+        return self._to_persisted(scan, current_open_changes=False) if scan else None
+
+    def _to_persisted(
+        self, scan: ScanRunModel, *, current_open_changes: bool
+    ) -> PersistedScan:
+        source = self.session.get(DataSourceModel, scan.source_id)
+        if source is None:
+            raise LookupError(f"scan source not found: {scan.source_id}")
+        change_filter = (
+            (
+                SchemaChangeModel.source_id == scan.source_id,
+                SchemaChangeModel.state == ChangeState.OPEN,
+            )
+            if current_open_changes
+            else (SchemaChangeModel.scan_id == scan.id,)
+        )
+        change_rows = self.session.execute(
+            select(SchemaChangeModel, DatasetModel)
+            .join(DatasetModel, SchemaChangeModel.dataset_id == DatasetModel.id)
+            .where(*change_filter)
+            .order_by(
+                DatasetModel.schema_name,
+                DatasetModel.table_name,
+                SchemaChangeModel.column_name,
+                SchemaChangeModel.change_type,
+            )
+        ).tuples()
+        changes = tuple(
+            PersistedChange(
+                id=change.id,
+                dataset=DatasetRef(dataset.schema_name, dataset.table_name),
+                column_name=change.column_name,
+                change_type=change.change_type,
+                severity=change.severity,
+                state=change.state,
+                before=change.before_json,
+                after=change.after_json,
+            )
+            for change, dataset in change_rows
+        )
+        return PersistedScan(
+            id=scan.id,
+            source_key=source.key,
+            trigger=scan.trigger,
+            status=scan.status,
+            started_at=scan.started_at,
+            finished_at=scan.finished_at,
+            duration_ms=scan.duration_ms,
+            error_code=scan.error_code,
+            error_message=scan.error_message,
+            changes=changes,
+        )
 
 
 class SourceNotFound(LookupError):

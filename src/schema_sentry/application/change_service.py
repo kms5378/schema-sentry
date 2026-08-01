@@ -17,7 +17,8 @@ class BaselineVersionConflict(RuntimeError):
 
 
 class LockedAcceptance(Protocol):
-    baseline_version: int
+    @property
+    def baseline_version(self) -> int: ...
 
     def apply(self) -> int: ...
 

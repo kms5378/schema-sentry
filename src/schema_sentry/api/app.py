@@ -1,15 +1,12 @@
-from typing import Final
-
 from fastapi import FastAPI
 
-APP_TITLE: Final = "Schema Sentry"
-
-
-def liveness() -> dict[str, str]:
-    return {"status": "alive"}
+from schema_sentry.api.routers import changes, health, pipelines, scans
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title=APP_TITLE, version="0.1.0")
-    app.add_api_route("/health/live", liveness, methods=["GET"], tags=["health"])
+    app = FastAPI(title="Schema Sentry", version="0.1.0")
+    app.include_router(health.router)
+    app.include_router(scans.router)
+    app.include_router(changes.router)
+    app.include_router(pipelines.router)
     return app

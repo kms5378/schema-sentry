@@ -15,6 +15,8 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY src ./src
+COPY alembic.ini ./alembic.ini
+COPY alembic ./alembic
 RUN uv sync --frozen --no-dev
 
 RUN useradd --create-home --uid 10001 schema-sentry

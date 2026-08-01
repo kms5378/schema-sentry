@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     source_database_url: str
     api_key: SecretStr
     auth_disabled: bool = False
+    trust_proxy_auth: bool = False
     log_level: str = "INFO"
 
     @model_validator(mode="after")
