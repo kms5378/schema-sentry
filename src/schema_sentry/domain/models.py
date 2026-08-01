@@ -56,6 +56,7 @@ class ColumnDefinition:
     data_type: CanonicalType
     nullable: bool
     default: str | None
+    ordinal: int = 0
 
     @property
     def ref(self) -> ColumnRef:

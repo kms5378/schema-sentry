@@ -13,6 +13,7 @@ services:
     volumes:
       - source-data:/var/lib/postgresql/data
       - ./deploy/postgres/source/001-create-reader.sh:/docker-entrypoint-initdb.d/001-create-reader.sh:ro
+      - ./demo/sql/001_game_schema.sql:/docker-entrypoint-initdb.d/010-game-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U game_admin -d game_source"]
       interval: 2s
