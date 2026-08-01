@@ -1,0 +1,1 @@
+"""Metadata Repository database adapter."""
