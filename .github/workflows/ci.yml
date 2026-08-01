@@ -17,7 +17,7 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - run: uv sync --frozen
-      - run: docker compose up -d --wait source-db metadata-db mailpit
+      - run: docker compose up -d --wait source-db source-permissions-init metadata-db mailpit
       - name: Lint
         run: uv run ruff check .
       - name: Type check
@@ -26,3 +26,7 @@ jobs:
         env:
           SCHEMA_SENTRY_SOURCE_DATABASE_URL: postgresql+psycopg://schema_sentry_reader:source_reader_dev@localhost:55432/game_source
         run: uv run pytest --cov=src/schema_sentry --cov-report=term-missing --cov-fail-under=85
+      - name: Test Airflow DAGs
+        run: |
+          docker compose build airflow-api-server
+          docker compose run --rm --no-deps airflow-api-server bash -c 'pytest /opt/airflow/tests -q'

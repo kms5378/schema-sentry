@@ -22,6 +22,10 @@ SOURCE_ADMIN_DATABASE_URL = os.getenv(
     "SCHEMA_SENTRY_SOURCE_ADMIN_DATABASE_URL",
     "postgresql://game_admin:game_admin_dev@localhost:55432/game_source",
 )
+PIPELINE_DATABASE_URL = os.getenv(
+    "SCHEMA_SENTRY_PIPELINE_DATABASE_URL",
+    "postgresql://schema_sentry_pipeline:pipeline_writer_dev@localhost:55432/game_source",
+)
 
 
 @pytest.fixture(scope="session")
@@ -68,6 +72,11 @@ def source_database_url() -> str:
     return SOURCE_DATABASE_URL
 
 
+@pytest.fixture(scope="session")
+def pipeline_database_url() -> str:
+    return PIPELINE_DATABASE_URL
+
+
 @pytest.fixture
 def game_source_schema() -> Iterator[None]:
     setup_sql = Path("demo/sql/001_game_schema.sql").read_text()
@@ -78,4 +87,11 @@ def game_source_schema() -> Iterator[None]:
         connection.execute("DROP TABLE IF EXISTS public.matches CASCADE")
         connection.execute("DROP TABLE IF EXISTS public.players CASCADE")
         connection.execute(setup_sql)
+        connection.execute(
+            "GRANT SELECT ON TABLE public.purchases TO schema_sentry_pipeline"
+        )
+        connection.execute(
+            "GRANT SELECT, INSERT, UPDATE ON TABLE mart.daily_revenue "
+            "TO schema_sentry_pipeline"
+        )
     yield

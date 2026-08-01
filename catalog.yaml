@@ -1,6 +1,6 @@
 pipelines:
   - key: daily_revenue
-    airflow_dag_id: daily_revenue_dag
+    airflow_dag_id: daily_revenue
     owner: analytics
     criticality: critical
     inputs:

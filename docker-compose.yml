@@ -1,5 +1,29 @@
 name: schema-sentry
 
+x-airflow-common: &airflow-common
+  image: schema-sentry-airflow:3.3.0
+  build:
+    context: .
+    dockerfile: airflow/Dockerfile
+  environment:
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-local-development-airflow-jwt-secret}
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__FERNET_KEY: ""
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__PARALLELISM: "4"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:-airflow_dev}@airflow-db:5432/airflow
+    SCHEMA_SENTRY_API_KEY: ${SCHEMA_SENTRY_API_KEY:-local-development-key}
+    SCHEMA_SENTRY_API_URL: http://api:8000
+    SOURCE_DATABASE_URL: postgresql://schema_sentry_pipeline:${SOURCE_DB_PIPELINE_PASSWORD:-pipeline_writer_dev}@source-db:5432/game_source
+  user: "${AIRFLOW_UID:-50000}:0"
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags:ro
+    - ./airflow/tests:/opt/airflow/tests:ro
+    - airflow-logs:/opt/airflow/logs
+
 services:
   source-db:
     image: postgres:17.10-bookworm
@@ -20,6 +44,21 @@ services:
       timeout: 3s
       retries: 15
 
+  source-permissions-init:
+    image: postgres:17.10-bookworm
+    environment:
+      PGHOST: source-db
+      PGDATABASE: game_source
+      PGUSER: game_admin
+      PGPASSWORD: ${SOURCE_DB_ADMIN_PASSWORD:-game_admin_dev}
+      SCHEMA_SENTRY_PIPELINE_PASSWORD: ${SOURCE_DB_PIPELINE_PASSWORD:-pipeline_writer_dev}
+    volumes:
+      - ./deploy/postgres/source/migrate-pipeline-role.sh:/usr/local/bin/migrate-pipeline-role.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/migrate-pipeline-role.sh"]
+    depends_on:
+      source-db:
+        condition: service_healthy
+
   metadata-db:
     image: postgres:17.10-bookworm
     environment:
@@ -35,6 +74,21 @@ services:
       interval: 2s
       timeout: 3s
       retries: 15
+
+  airflow-db:
+    image: postgres:17.10-bookworm
+    environment:
+      POSTGRES_DB: airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD:-airflow_dev}
+    volumes:
+      - airflow-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
 
   mailpit:
     image: axllent/mailpit:v1.30.6
@@ -82,6 +136,55 @@ services:
       timeout: 3s
       retries: 10
 
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command: -c "airflow db migrate"
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+
+  airflow-api-server:
+    <<: *airflow-common
+    command: api-server
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+      source-permissions-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-api-server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-api-server:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   source-data:
   metadata-data:
+  airflow-data:
+  airflow-logs:
