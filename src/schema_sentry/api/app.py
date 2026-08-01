@@ -5,11 +5,14 @@ from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
 
 from schema_sentry.api.routers import alerts, changes, dashboard, health, pipelines, scans
+from schema_sentry.config import get_settings
+from schema_sentry.logging import configure_logging
 
 STATIC_DIRECTORY = Path(__file__).resolve().parent / "static"
 
 
 def create_app() -> FastAPI:
+    configure_logging(get_settings().log_level)
     app = FastAPI(title="Schema Sentry", version="0.1.0")
 
     @app.middleware("http")

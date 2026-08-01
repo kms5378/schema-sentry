@@ -218,14 +218,9 @@ class SqlAlchemyScanRepository:
 
     @contextmanager
     def try_source_lock(self, source_key: str) -> Iterator[bool]:
-        lock_sql = text("SELECT pg_try_advisory_lock(hashtextextended(:source_key, 0))")
-        unlock_sql = text("SELECT pg_advisory_unlock(hashtextextended(:source_key, 0))")
+        lock_sql = text("SELECT pg_try_advisory_xact_lock(hashtextextended(:source_key, 0))")
         acquired = bool(self.session.scalar(lock_sql, {"source_key": source_key}))
-        try:
-            yield acquired
-        finally:
-            if acquired:
-                self.session.execute(unlock_sql, {"source_key": source_key})
+        yield acquired
 
     def create_running_scan(self, source_key: str, trigger: ScanTrigger) -> UUID:
         source = self._source(source_key)

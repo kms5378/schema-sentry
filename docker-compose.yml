@@ -110,6 +110,8 @@ services:
       SCHEMA_SENTRY_SOURCE_DATABASE_URL: postgresql+psycopg://schema_sentry_reader:${SOURCE_DB_READER_PASSWORD:-source_reader_dev}@source-db:5432/game_source
       SCHEMA_SENTRY_API_KEY: ${SCHEMA_SENTRY_API_KEY:-local-development-key}
       SCHEMA_SENTRY_AUTH_DISABLED: "true"
+      SCHEMA_SENTRY_LOG_LEVEL: ${SCHEMA_SENTRY_LOG_LEVEL:-INFO}
+      SCHEMA_SENTRY_SLACK_WEBHOOK_URL: ${SCHEMA_SENTRY_SLACK_WEBHOOK_URL:-}
       SCHEMA_SENTRY_SMTP_HOST: mailpit
       SCHEMA_SENTRY_SMTP_PORT: "1025"
       SCHEMA_SENTRY_EMAIL_FROM: schema-sentry@localhost

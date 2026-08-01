@@ -1,6 +1,6 @@
 UV ?= uv
 
-.PHONY: sync lint typecheck test check up down
+.PHONY: sync lint typecheck test check up down prod-config prod-up prod-smoke
 
 sync:
 	$(UV) sync --frozen
@@ -21,3 +21,13 @@ up:
 
 down:
 	docker compose down
+
+prod-config:
+	./scripts/validate-production-env.sh .env.production
+	docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml config --quiet
+
+prod-up: prod-config
+	docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+
+prod-smoke:
+	./scripts/smoke-test.sh

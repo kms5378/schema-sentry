@@ -1,4 +1,7 @@
+import json
 from uuid import uuid4
+
+import pytest
 
 from schema_sentry.application.validation_service import BlockingChange, ValidationService
 from schema_sentry.domain.enums import ChangeType, Severity
@@ -37,3 +40,19 @@ def test_pipeline_without_open_breaking_change_is_safe() -> None:
 
     assert result.safe is True
     assert result.blocking_changes == ()
+
+
+def test_validation_emits_structured_pipeline_status(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from schema_sentry.logging import configure_logging
+
+    configure_logging("INFO")
+
+    ValidationService(FakeValidationRepository(())).validate_pipeline("daily_revenue")
+
+    event = json.loads(capsys.readouterr().out)
+    assert event["event"] == "pipeline_validation_completed"
+    assert event["pipeline_key"] == "daily_revenue"
+    assert event["status"] == "SAFE"
+    assert isinstance(event["duration_ms"], int)

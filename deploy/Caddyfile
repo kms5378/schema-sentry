@@ -1,0 +1,11 @@
+{$SCHEMA_SENTRY_DOMAIN} {
+	encode zstd gzip
+
+	basic_auth {
+		{$SCHEMA_SENTRY_ADMIN_USER} {$SCHEMA_SENTRY_ADMIN_HASH}
+	}
+
+	reverse_proxy api:8000 {
+		header_up X-Authenticated-User {http.auth.user.id}
+	}
+}
